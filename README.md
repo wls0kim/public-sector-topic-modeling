@@ -44,7 +44,7 @@
 
 - 실행에 필요한 파일(비공개): `blind_raw.csv`(01용 원자료), `raw.csv`(03용 원자료), `synonymDic.csv`(동의어 사전)
 - 사용자 사전 `userDIC.txt`는 코드에서 생성
-- 같은 자료를 보고서 형식으로 다시 분석한 수업 프로젝트: [nlp-llm-practice](https://github.com/wls0kim/nlp-llm-practice)
+- 같은 자료를 보고서 형식으로 다시 분석한 코드: [nlp-llm-practice](https://github.com/wls0kim/nlp-llm-practice)
 
 ## 성과
 
