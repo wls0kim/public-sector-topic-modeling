@@ -2,8 +2,8 @@
 # 석사학위논문(2024.02) 분석: 공무원 리뷰의 장점, 단점, 한줄평 토픽 모델링
 #
 # - 입력: raw.csv (리뷰 원자료), synonymDic.csv (동의어 사전)
-# - 공변량 없이 장점(K = 23), 단점(K = 34) 모형을 적합하고 대표 단어, 대표 문서를 정리한다.
-#   만족도를 공변량으로 넣은 학술지 버전은 02_stm_pros_cons.Rmd에 있다.
+# - 공변량 없는 장점(K = 23), 단점(K = 34) 모형 적합, 대표 단어와 대표 문서 정리
+#   만족도를 공변량으로 넣은 학술지 버전: 02_stm_pros_cons.Rmd
 # - 형태소 분석에 NLP4kec 패키지를 쓴다 (CRAN에 없어 GitHub에서 설치).
 # - 순서: 텍스트 정제 → 형태소 분석 → 동의어 통일 → 불용어 제거와 말뭉치 생성
 #         → 토픽 수 탐색 → STM 적합 → 대표 단어, 대표 문서 저장 → 토픽 비율 그래프
@@ -25,7 +25,7 @@ data <- read_csv("raw.csv")
 
 
 # 2. 문장부호와 띄어쓰기 제거 ---------------------------------------------------
-# 원문 열(cons, pros, title)은 남겨 두고 정제한 텍스트를 새 열(*pos)에 만든다.
+# 원문 열(cons, pros, title)은 유지, 정제한 텍스트는 새 열(*pos)에 저장
 clean_text <- function(x) {
   x %>%
     str_replace_all("[[:punct:]]", " ") %>%  # 문장부호를 공백으로
@@ -39,7 +39,7 @@ data$titlepos <- clean_text(data$title)  # 한줄평
 
 
 # 3. 사용자 사전과 형태소 분석 ---------------------------------------------------
-# 형태소 분석기가 쪼개면 안 되는 신조어, 직장 용어를 한 단어로 등록한다.
+# 사용자 사전: 쪼개지면 안 되는 신조어, 직장 용어
 userWord <- c("고인물", "부바부","부서바이부서","부바이부",
               "팀바이팀","팀바팀","워라밸","워라벨",
               "사람바이사람","사바사","칼퇴","교육체계",
@@ -59,7 +59,7 @@ userWord <- c("고인물", "부바부","부서바이부서","부바이부",
 write.table(userWord, file = "./userDIC.txt", quote = TRUE,
             row.names = FALSE, col.names = FALSE, fileEncoding = "UTF-8")
 
-# 문서마다 형태소 분석 결과(공백으로 구분된 형태소 문자열)를 돌려준다
+# 문서별 형태소 분석 결과 (공백으로 구분된 형태소 문자열)
 fun1 <- function(x) {
   r_parser_r(contentVector = x, language = "ko", korDicPath = "./userDIC.txt") %>%
     as.list()
@@ -71,7 +71,7 @@ for (col in c("Conspos", "Prospos", "titlepos")) {
 
 
 # 4. 동의어 처리 ----------------------------------------------------------------
-# 표기만 다른 같은 단어를 하나로 통일한다 (예: 워라벨 → 워라밸)
+# 표기만 다른 같은 단어 통일 (예: 워라벨 → 워라밸)
 synonymDic <- read.csv("./synonymDic.csv", header = TRUE, fileEncoding = "CP949")
 
 synonym_processing <- function(parsedVector, synonymDic) {
@@ -87,7 +87,7 @@ data$titlepos <- synonym_processing(data$titlepos, synonymDic)
 
 
 # 5. 불용어 제거와 말뭉치 생성 ---------------------------------------------------
-# 한국어 불용어 목록에 "회사", "장점", "단점"처럼 모든 리뷰에 나오는 단어를 더했다
+# 한국어 불용어 + 모든 리뷰에 나오는 단어("회사", "장점", "단점" 등)
 stopwords_ko <- c("가량", "가지", "각", "간", "갖은", "개", "개국", "개년", "개소", 
           "개월", "걔", "거", "거기", "거리", "건", "것", "겨를", 
           "격","겸", "고", "군", "군데", "권", "그", "그거", "그것", "그곳", 
@@ -125,7 +125,7 @@ stopwords_ko <- c("가량", "가지", "각", "간", "갖은", "개", "개국", "
           "차","것","날","분","중","줄","간","내",
           "뭣","급","점","원","데")
 
-# 한 글자 단어도 남기고(wordLengths), 불용어를 지운 말뭉치를 만든다
+# 말뭉치 생성: 한 글자 단어 유지(wordLengths), 불용어 제거
 make_corpus <- function(text) {
   textProcessor(documents = text, metadata = data,
                 wordLengths = c(1, Inf), customstopwords = stopwords_ko)
@@ -134,14 +134,14 @@ processedcons  <- make_corpus(data$Conspos)
 processedpros  <- make_corpus(data$Prospos)
 processedtitle <- make_corpus(data$titlepos)
 
-# STM 입력 형식(문서, 어휘, 메타데이터)으로 바꾼다
+# STM 입력 형식(문서, 어휘, 메타데이터)으로 변환
 outcons  <- prepDocuments(processedcons$documents,  processedcons$vocab,  processedcons$meta)
 outpros  <- prepDocuments(processedpros$documents,  processedpros$vocab,  processedpros$meta)
 outtitle <- prepDocuments(processedtitle$documents, processedtitle$vocab, processedtitle$meta)
 
 
 # 6. 토픽 수 탐색 ---------------------------------------------------------------
-# K = 10, 20, ..., 100에서 응집도, 배타성, 잔차 등을 비교한다
+# K = 10, 20, ..., 100의 응집도, 배타성, 잔차 등 비교
 topicN <- seq(10, 100, 10)
 storagecons  <- searchK(outcons$documents,  outcons$vocab,  K = topicN)
 storagepros  <- searchK(outpros$documents,  outpros$vocab,  K = topicN)
@@ -152,7 +152,7 @@ plot(storagetitle)
 
 
 # 7. STM 적합 -------------------------------------------------------------------
-# 탐색 결과를 보고 정한 토픽 수로 적합하고, 걸린 시간을 출력한다
+# 탐색 결과로 정한 토픽 수로 적합, 소요 시간 출력
 fit_stm <- function(out, K) {
   t_start <- Sys.time()
   fit <- stm(documents = out$documents, vocab = out$vocab, data = out$meta,
@@ -174,11 +174,11 @@ meta_fit34cons <- fit_stm(outcons, K = 34)  # 단점
 labelTopics(meta_fit23pros, n = 20)  # 장점
 labelTopics(meta_fit34cons, n = 20)  # 단점
 
-# 제거된 문서 번호가 없을 때(integer(0)) d[-idx, ]가 빈 자료가 되는 것을 막는다
+# 제거된 문서가 없을 때(integer(0)) d[-idx, ]가 빈 자료가 되는 문제 방지
 drop_rows <- function(d, idx) if (length(idx) > 0) d[-idx, ] else d
 
-# 말뭉치를 만들며 빠진 문서를 원자료에서도 빼야 모형의 문서 순서와 원문이 맞는다.
-# 토픽별 대표 문서 40개를 찾아 인덱스와 원문을 엑셀 두 시트에 저장한다.
+# 말뭉치 생성 과정에서 빠진 문서를 원자료에서도 제외 (모형의 문서 순서와 원문 일치)
+# 토픽별 대표 문서 40개의 인덱스와 원문을 엑셀 두 시트에 저장
 save_thoughts <- function(model, processed, out, texts_col, file) {
   d <- drop_rows(data, processed$docs.removed)  # 형태소, 불용어 처리 후 빈 문서
   d <- drop_rows(d, out$docs.removed)           # prepDocuments에서 빠진 문서
