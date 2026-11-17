@@ -1,0 +1,499 @@
+---
+title: "온라인 리뷰로 본 공무원의 공직 장단점 인식: 구조적 토픽 모델링"
+author: "김진영, 이솔빈"
+date: "2024-05-23"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: yeti
+---
+
+공무원이 직장 리뷰 사이트에 남긴 장점, 단점 텍스트를 구조적 토픽 모델링(STM)으로 분석하고, 총 만족도(저만족, 고만족)에 따라 토픽 비중이 달라지는지 확인했습니다. 한국인사행정학회보(2024) 게재 논문의 최종 분석 코드입니다.
+
+- 필요한 파일: `blind.csv` (형태소 분석까지 끝난 리뷰 자료, `Prospos`, `Conspos` 열 포함), `synonymDic.csv` (동의어 사전)
+- 형태소 분석과 사용자 사전 적용은 `01_preprocessing.R`에서 했습니다.
+- 순서: 동의어 처리 → 불용어 제거와 문서-단어 행렬 → STM 적합(장점 K = 23, 단점 K = 34) → 대표 단어, 대표 문서 → 공변량 효과 → 토픽 라벨 → 시각화(토픽 비율, 만족도별 차이, 토픽 간 상관망)
+
+## 1. 준비
+
+```{r setup, message = FALSE}
+library(dplyr)
+library(stringr)
+library(openxlsx)  # 대표 문서 엑셀 저장
+library(stm)       # 구조적 토픽 모델링
+library(igraph)    # 토픽 상관망
+library(showtext)  # 그래프 한글 표시
+showtext_auto()
+
+KOREAN_FONT <- "AppleGothic"  # 그래프 한글 글꼴 (macOS 기준, 다른 OS는 설치된 한글 글꼴 이름으로 바꿈)
+```
+
+## 2. 자료 준비
+
+### 1. 데이터 불러오기
+```{r}
+data = read.csv("blind.csv", fileEncoding = "cp949")  # 형태소 분석 결과(Prospos, Conspos)가 포함된 리뷰 자료
+
+# 장점, 단점을 따로 분석하기 위해 자료를 나눈다
+datacons = data[, c(-2, -10, -13)]  # pros, status, Prospos 제거
+datapros = data[, c(-3, -10, -12)]  # cons, status, Conspos 제거
+```
+
+### 2. 동의어 처리 
+```{r}
+synonymDic = read.csv("synonymDic.csv", header = T, fileEncoding = "CP949")  # originWord → changeWord
+
+# 표기만 다른 같은 단어를 하나로 통일 (예: 워라벨 → 워라밸)
+synonym_processing <- function(parsedVector, synonymDic) {
+  for (i in 1:nrow(synonymDic)) {
+    parsedVector <- gsub(synonymDic$originWord[i], synonymDic$changeWord[i], parsedVector)
+  }
+  parsedVector
+}
+
+parsedDatacons = synonym_processing(parsedVector = data$Conspos, synonymDic = synonymDic)
+parsedDatapros = synonym_processing(parsedVector = data$Prospos, synonymDic = synonymDic)
+
+# 공변량: 총 만족도 1~2점 → 0(저만족), 3~5점 → 1(고만족)
+datapros$level = factor(ifelse(datapros$total %in% c(1, 2), 0, 1))
+datacons$level = factor(ifelse(datacons$total %in% c(1, 2), 0, 1))
+
+datacons$Conspos = parsedDatacons
+datapros$Prospos = parsedDatapros
+
+# 결측 사례 제거
+datacons = na.omit(datacons)
+datapros = na.omit(datapros)
+```
+
+### 3. 불용어 제거와 문서-단어 행렬
+```{r}
+stopwords_ko = c("하다", "있다", "되다", "회사", "단점", "장점", "가량", "가지", "각", "수",
+                 "곳", "뿐", "등", "만", "시", "등", "때", "나", "듯", "간", "편", "외",
+                 "년", "차", "것", "날", "분", "중", "줄", "간", "내", "뭣", "급", "점",
+                 "원", "데")
+
+processedpros = textProcessor(documents = datapros$Prospos, metadata = datapros,
+                              wordLengths = c(1, Inf), customstopwords = stopwords_ko)
+processedcons = textProcessor(documents = datacons$Conspos, metadata = datacons,
+                              wordLengths = c(1, Inf), customstopwords = stopwords_ko)
+
+# 5번 미만 등장한 단어 제거 후 STM 입력 형태로 변환
+outpros = prepDocuments(processedpros$documents, processedpros$vocab,
+                        processedpros$meta, lower.thresh = 5)
+outcons = prepDocuments(processedcons$documents, processedcons$vocab,
+                        processedcons$meta, lower.thresh = 5)
+```
+
+### 4. STM 입력 정리
+```{r}
+#장점
+outdocspros =  outpros$documents
+outvocabpros =  outpros$vocab
+outmetapros = outpros$meta
+summary(outpros)
+
+#단점
+outdocscons =  outcons$documents
+outvocabcons = outcons$vocab
+outmetacons = outcons$meta
+summary(outcons)
+```
+
+## 3. STM 적합
+
+토픽 수는 `searchK()` 지표와 토픽 해석 가능성을 함께 검토해 장점 23개, 단점 34개로 정했습니다. 만족 수준(level)을 토픽 비중(prevalence)의 공변량으로 넣었습니다.
+
+### 1. 장점 모형
+```{r}
+t1 = Sys.time()
+
+meta_fit23pros = 
+  stm(
+    documents = outdocspros,
+    vocab = outvocabpros,
+    data = outmetapros,
+    K = 23,         
+    prevalence =~ level, #공변인
+    max.em.its = 75, #최대 반복계산 횟수 
+    verbose = F,  #반복계산결과 화면출력 X
+    init.type = "Spectral",
+    seed = 37 
+  )
+
+t2 = Sys.time()
+
+t2-t1
+```
+
+### 2. 단점 모형
+```{r}
+t1 = Sys.time()
+
+meta_fit34cons = 
+  stm(
+    documents = outdocscons,
+    vocab = outvocabcons,
+    data = outmetacons,
+    K = 34,         
+    prevalence =~ level, #공변인
+    max.em.its = 75, #최대 반복계산 횟수 
+    verbose = F, #반복계산결과 화면출력 X
+    init.type = "Spectral",
+    seed = 37 
+  )
+
+t2 = Sys.time()
+
+t2-t1
+```
+
+
+## 4. 대표 단어와 대표 문서
+
+토픽마다 대표 단어 20개와 토픽 비중이 가장 높은 문서 40개를 뽑아 토픽 이름을 정하는 데 썼습니다. 전처리 과정에서 빠진 문서를 원문 자료에서도 빼야 문서 번호가 맞습니다.
+
+```{r}
+# 제거된 문서 번호가 없을 때(NULL) d[-NULL, ]이 빈 자료가 되는 것을 막는다
+drop_rows <- function(d, idx) if (length(idx) > 0) d[-idx, ] else d
+
+# 대표 문서를 엑셀 파일 하나에 저장 (index 시트: 문서 번호, doc 시트: 원문)
+save_thoughts <- function(thoughts, file) {
+  wb <- createWorkbook()
+  addWorksheet(wb, "index"); writeDataTable(wb, "index", as.data.frame(thoughts$index))
+  addWorksheet(wb, "doc");   writeDataTable(wb, "doc",   as.data.frame(thoughts$docs))
+  saveWorkbook(wb, file = file, overwrite = TRUE)
+}
+```
+
+### 1. 장점 모형
+```{r}
+datapros1 = drop_rows(datapros,  processedpros$docs.removed)  # textProcessor에서 빠진 문서
+datapros1 = drop_rows(datapros1, outpros$docs.removed)        # prepDocuments에서 빠진 문서
+
+doc_pros = findThoughts(model = meta_fit23pros, texts = datapros1$pros, n = 40)
+save_thoughts(doc_pros, "전처리후pros23_412.xlsx")
+
+labelTopics(meta_fit23pros, n = 20)
+```
+
+### 2. 단점 모형
+```{r}
+datacons1 = drop_rows(datacons,  processedcons$docs.removed)
+datacons1 = drop_rows(datacons1, outcons$docs.removed)
+
+doc_cons = findThoughts(model = meta_fit34cons, texts = datacons1$cons, n = 40)
+save_thoughts(doc_cons, "전처리후cons34_412.xlsx")
+
+labelTopics(meta_fit34cons, n = 20)
+```
+
+## 5. 공변량 효과
+
+만족 수준에 따라 토픽 비중이 다른지 회귀로 추정합니다. 계수가 양수면 고만족 집단에서 더 많이 언급된 토픽입니다.
+
+### 1. 장점 모형
+```{r}
+preppros23 =  estimateEffect(formula =~ level, stmobj = meta_fit23pros,
+                            metadata = outpros$meta,
+                            uncertainty = "Global")
+summary(preppros23)
+
+capture.output(summary(preppros23), file = "preppros23_0412.txt")
+```
+
+### 2. 단점 모형
+```{r}
+prepcons34 = estimateEffect(formula =~ level, stmobj = meta_fit34cons,
+                             metadata = outcons$meta,
+                             uncertainty = "Global")
+summary(prepcons34)
+capture.output(summary(prepcons34), file = "precons34_0412.txt")
+```
+
+
+## 6. 토픽 이름
+
+대표 단어와 대표 문서를 검토해 붙인 이름입니다. 의미를 해석하기 어려운 토픽은 빈칸으로 두고 이후 시각화에서 뺐습니다.
+
+### 1. 장점 모형
+```{r}
+proslabel = c("수평적 조직문화",
+               "국가/국민에 대한 사명감·자부심",
+               "공무원에 대한 긍정적인 사회적 인식",
+               "업무의 다양성",
+               "수당 및 복지혜택",
+               "빠른 퇴근과 방학의 존재",
+               "임금체불의 부재",
+               "좋은 동료",
+               "정년보장",
+               "고용불안의 부재",
+               "공무원에 대한 가족의 긍정적 인식",
+               "휴가·휴직 사용의 자유로움",
+               " ",
+               " ",
+               "사기업에 비하여 적은 실적/성과 압박",
+               "심리적 안정감",
+               "연고지 근무",
+               "고용안정성",
+               "조직의 안정성",
+               "노후보장",
+               "자기계발의 기회 제공",
+               "칼퇴근",
+               "채용제도")
+```
+
+### 2. 단점 모형
+```{r}
+conslabel = c("고용안정성으로 인한 동료의 불성실함",
+               "낮은 실수령액",
+               "업무강도 대비 낮은 임금",
+               "열정페이",
+               "낮은 임금상승률",
+               "고인물",
+               "민원으로 인한 스트레스",
+               " ",
+               "잦은 업무이동 및 인수인계 부재",
+               "공무원에 대한 부정적 시선",
+               "자기계발의 부재",
+               "수직적 조직문화",
+               "순환근무",
+               "낮은 임금",
+               "비효율적 업무 시스템",
+               "커리어 향상의 어려움",
+               "비자발적 초과근무",
+               "학부모/학생의 불만·민원",
+               "꼰대문화",
+               " ",
+               "교대근무",
+               "악성 민원",
+               "사기업 대비 낮은 임금",
+               "팀/부서별로 달라지는 업무환경·분위기", 
+               "매너리즘",
+               "공무원 연금 감액",
+               " ",
+               "낮은 급여와 복지혜택",
+               "꼰대상사",
+               "고용형태·직렬별 차별적 처우",
+               "우물 안 개구리",
+               "직장 내 정치",
+               "비연고지 발령으로 인한 경제적 부담",
+               "워라밸 부족")
+```
+
+## 7. 시각화: 토픽별 평균 비율
+
+### 1. 장점 모형
+```{r}
+par(family = KOREAN_FONT, cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.2)
+plot(meta_fit23pros, type = "summary", custom.labels = proslabel, main = "장점: 평균토픽비율",
+     xlim = c(0,.15))
+```
+
+### 2. 단점 모형
+```{r}
+plot(meta_fit34cons, type = "summary", custom.labels = conslabel, main = "단점: 평균토픽비율",
+     xlim = c(0, 0.08))
+```
+
+## 8. 시각화: 만족 수준에 따른 토픽 비중 차이
+
+### 1. 기본 플랏 생성
+```{r}
+par(family = KOREAN_FONT, mar = c(5, 8, 4, 2) + 0.1)  #텍스트 설정
+
+#장점
+dprosplot = plot.estimateEffect(preppros23,
+                                 covariate = "level",
+                                 topics = c(1:23),
+                                 model = meta_fit23pros,
+                                 method = "difference",
+                                 cov.value1 = 1,
+                                 cov.value2 = 0,
+                                 xlab = "(만족도 낮음 v.s. 만족도 높음)문서당 주제 분포 비율",
+                                 main = "평점에 따른 문서별 주제 분포(장점)",
+                                 xlim = c(-.025,.025),
+                                 labeltype = "custom",
+                                 custom.labels = proslabel)
+#단점
+dconsplot = plot.estimateEffect(prepcons34,
+                                 covariate = "level",
+                                 topics = c(1:34),
+                                 model = meta_fit34cons,
+                                 method = "difference",
+                                 cov.value1 = 1,
+                                 cov.value2 = 0,
+                                 xlab = "(만족도 낮음 v.s. 만족도 높음)문서당 주제 분포 비율",
+                                 main = "평점에 따른 문서별 주제 분포(단점)",
+                                 xlim = c(-.025,.025),
+                                 labeltype = "custom",
+                                 custom.labels = conslabel)
+```
+
+### 2. 내림차순 정렬을 위한 정보 벡터화
+```{r}
+#장점
+prosmean = dprosplot[["means"]] #mean 저장
+proscis = dprosplot[["cis"]]  #cis 저장
+
+vec_prosmean = unlist(prosmean) 
+vec_proscis = unlist(proscis) #토픽의 첫 cis/마지막 cis, 두번째 … 순 정렬
+vec_proscis2.5 = vec_proscis[c(seq(1,46,2))]
+vec_proscis97.5 = vec_proscis[c(seq(2,46,2))]
+vec_prosrank = rank(vec_prosmean) #mean 간 랭킹
+vec_proslabel =  dprosplot[["labels"]] #라벨링 
+
+df_plot_diff_pros = cbind(vec_prosmean,vec_prosrank,vec_proscis2.5,vec_proscis97.5,vec_proslabel) %>% 
+  as.data.frame()
+
+#단점
+consmean = dconsplot[["means"]]
+conscis = dconsplot[["cis"]]
+
+vec_consmean = unlist(consmean) 
+vec_conscis = unlist(conscis) #토픽의 첫 cis/마지막 cis, 두번째 … 순 정렬
+vec_conscis2.5 = vec_conscis[c(seq(1,68,2))]
+vec_conscis97.5 = vec_conscis[c(seq(2,68,2))]
+vec_consrank = rank(vec_consmean) #mean 간 랭킹
+vec_conslabel =  dconsplot[["labels"]] #라벨링 
+
+df_plot_diff_cons = cbind(vec_consmean,vec_consrank,vec_conscis2.5,vec_conscis97.5,vec_conslabel) %>% 
+  as.data.frame()
+```
+
+### 3. 장점 모델
+```{r}
+ylim = c(0, 24) #토픽수 +2로 y축 설정
+xlim = c(min(unlist(proscis), na.rm=T), max(unlist(proscis), na.rm=T))
+xlab = "총 만족도 낮음 v.s. 총 만족도 높음" 
+ylab = ""
+plot(0, 0,col = "white", xlim = c(-0.03,0.03), ylim = ylim,
+     xlab = xlab, ylab = ylab, yaxt = "n") #배경과 축지정
+title(main = "장점 : 토픽별 회귀계수")
+
+#내용 넣기
+for (i in 1:23){
+  points(df_plot_diff_pros[i,1], df_plot_diff_pros[i,2], pch = 19, cex = 1)
+  lines(c(df_plot_diff_pros[i,3], df_plot_diff_pros[i,4]),
+        c(df_plot_diff_pros[i,2], df_plot_diff_pros[i,2]))
+  axis(2,at=df_plot_diff_pros[i,2], labels=stringr::str_wrap(df_plot_diff_pros[i,5]),
+       las=1, cex=.25, tick=F, pos=df_plot_diff_pros[i,3])
+}
+```
+
+### 4. 단점 모델
+```{r}
+ylim = c(0, 35) #토픽수 +2로 y축 설정
+xlim = c(min(unlist(conscis), na.rm=T), max(unlist(conscis), na.rm=T))
+xlab = "총 만족도 낮음 v.s. 총 만족도 높음" 
+ylab = ""
+plot(0, 0, col = "white", xlim = c(-0.025,0.025), ylim = ylim,
+     xlab = xlab, ylab = ylab, yaxt = "n") #배경과 축지정
+title(main = "단점 : 토픽별 회귀계수")
+
+for(i in 1:34){
+  points(df_plot_diff_cons[i,1], df_plot_diff_cons[i,2], pch = 19, cex = 1)
+  lines(c(df_plot_diff_cons[i,3], df_plot_diff_cons[i,4]),
+        c(df_plot_diff_cons[i,2], df_plot_diff_cons[i,2]))
+  axis(2,at=df_plot_diff_cons[i,2], labels=stringr::str_wrap(df_plot_diff_cons[i,5]),
+       las=1, cex=.25, tick=F, pos=df_plot_diff_cons[i,3])
+}
+```
+
+## 9. 시각화: 토픽 간 상관망
+
+### 1. 상관분석 및 저장(기준 r = .16)
+```{r}
+#장점
+out.cor.pros0.16 = topicCorr(meta_fit23pros,method = "simple", cutoff = 0.16)
+df_cor.pros0.16 = out.cor.pros0.16[["cor"]] #피어슨 상관계수 행렬
+
+#단점
+out.cor.cons0.16 = topicCorr(meta_fit34cons,method = "simple", cutoff = 0.16) #STM 패키지 내 함수 이용
+df_cor.cons0.16 = out.cor.cons0.16[["cor"]] #피어슨 상관계수 행렬
+```
+
+
+### 2. 장점 모형
+```{r}
+#자료준비
+topics = c(1:23) #토픽 수 
+x = out.cor.pros0.16$posadj[topics, topics] #cut-off 넘는 관계, 인접행렬
+x = x[-c(13,14),-c(13,14)] #삭제된 토픽 제거
+g = igraph::graph.adjacency(x, mode="undirected", weighted=TRUE, diag=FALSE) #엣지 생성
+vlabels =  proslabel #라벨링 
+
+#엣지 설정
+igraph::V(g)$label = vlabels[-c(13,14)] #삭제된 토픽 라벨에서 제거
+igraph::E(g)$size = 1#엣지 사이즈
+igraph::E(g)$lty = 1 #엣지 스타일 지정
+igraph::E(g)$color = "black" #엣지 컬러 지정
+
+#노드 설정(열별 theta 평균)
+#열별로 세타 평균 구하기 FOR NODE 
+prostheta = data.frame(meta_fit23pros[["theta"]])
+prospre = apply(prostheta, 2, mean)
+prospre = prospre[-c(13,14)] #삭제된 토픽 제거 
+
+#토픽의 prevalence
+igraph::V(g)$size = prospre
+
+#노드 색
+cl_k = cluster_optimal(g) #클러스터링
+cl_k #들어가야 할 색 갯수 확인
+#멤버십에 따라 노드 색상 지정
+
+V(g)$color = membership(cl_k)
+#palette = brewer.pal(19, "Set3") # 팔레트 이용해 색상 지정
+g$palette = c("#fd7f6f", "#7eb0d5", "#b2e061", "#bd7ebe", "#ffb55a", 
+               "#ffee65", "#beb9db", "#fdcce5", "#8bd3c7", "#76c68f",
+               "#22a7f0", "#df8879", "#c86558", "#9080ff", "#b3d4ff",
+               "#63bff0", "#ff6f69", "#f9d423", "#83af9b")
+layout = igraph::layout.fruchterman.reingold #레이아웃 설정 
+igraph::plot.igraph(g, layout=layout, vertex.label.cex=1,
+                    vertex.label.color="black",vertex.size = prospre*500,
+                    vertex.label.family = KOREAN_FONT)
+```
+
+### 3. 단점 모형
+```{r}
+#자료준비
+topics = c(1:34) #토픽 수 
+x = out.cor.cons0.16$posadj[topics, topics] #cut-off 넘는 관계, 인접행렬
+x = x[-c(8,20,27),-c(8,20,27)] #삭제된 토픽 제거
+g = igraph::graph.adjacency(x, mode="undirected", weighted=TRUE, diag=FALSE) #엣지 생성
+vlabels =  conslabel #라벨링 
+
+#엣지 설정
+igraph::V(g)$label = vlabels[-c(8,20,27)] #삭제된 토픽 라벨에서 제거 
+igraph::E(g)$size = 1#엣지 사이즈
+igraph::E(g)$lty = 1 #엣지 스타일 지정
+igraph::E(g)$color = "black" #엣지 컬러 지정
+
+#노드 설정(열별 theta 평균)
+contheta = data.frame(meta_fit34cons[["theta"]])
+conpre = apply(contheta, 2, mean)
+conpre = conpre[-c(8,20,27)] #삭제된 토픽 제거 
+
+#토픽의 prevalence
+igraph::V(g)$size = conpre
+
+#노드 색
+cl_k = cluster_optimal(g) #클러스터링
+cl_k #들어가야 할 색 갯수 확인
+#멤버십에 따라 노드 색상 지정
+
+V(g)$color = membership(cl_k)
+g$palette = c("#fd7f6f", "#7eb0d5", "#b2e061", "#bd7ebe", "#ffb55a", 
+               "#ffee65", "#beb9db", "#fdcce5", "#8bd3c7", "#76c68f",
+               "#22a7f0", "#df8879", "#c86558", "#9080ff", "#b3d4ff",
+               "#63bff0", "#ff6f69", "#f9d423", "#83af9b", "#a97fb4", 
+               "#fe8464", "#e6e682", "#85d4e3", "#ff62a5", "#f2f2f2", 
+               "#7a6563")
+layout = igraph::layout.fruchterman.reingold #레이아웃 설정 
+igraph::plot.igraph(g, layout=layout, vertex.label.cex=1,
+                    vertex.label.color="black",vertex.size = conpre*500,
+                    vertex.label.family = KOREAN_FONT)
+```
