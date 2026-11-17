@@ -44,7 +44,6 @@
 
 - 실행에 필요한 파일(비공개): `blind_raw.csv`(01용 원자료), `raw.csv`(03용 원자료), `synonymDic.csv`(동의어 사전)
 - 사용자 사전 `userDIC.txt`는 코드에서 생성
-- 같은 리뷰 자료를 다른 형태소 분석기(Kiwi)와 토픽 수로 다시 분석한 코드: [nlp-llm-practice](https://github.com/wls0kim/nlp-llm-practice)
 
 ## 성과
 
