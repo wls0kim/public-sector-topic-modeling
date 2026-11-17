@@ -20,7 +20,7 @@ library(stm)        # textProcessor, prepDocuments
 # 1. 자료 불러오기 -------------------------------------------------------------
 data <- read.csv("blind_raw.csv", fileEncoding = "cp949")
 
-# 날짜 앞에 "20"을 붙여 연도를 네 자리로 만든다 (예: 21-11-03 → 2021-11-03)
+# 날짜 앞에 "20"을 붙여 연도를 네 자리로 변환 (예: 21-11-03 → 2021-11-03)
 data$date.tmp <- paste0("20", data$date.tmp)
 colnames(data) <- c("title", "pros", "cons", "total", "career", "wlb", "compensation",
                     "culture", "seniormanagement", "status", "date")
@@ -35,9 +35,9 @@ data$date <- as.Date(data$date)  # "2021-11-03" 형식 문자열을 날짜로 �
 # 원문은 유지, 정제한 텍스트는 별도 열(Conspos, Prospos)에 저장
 # "MZ세대"처럼 영문이 섞인 단어가 있어 영문은 유지
 
-data$Conspos <- data$cons %>%  # 원문은 남겨두기 위해서 따로 열을 만들어야 함   
+data$Conspos <- data$cons %>%   
   str_replace_all("[[:punct:]]"," ")%>%   # 모든 문장부호 제거 
-  str_squish() %>%  #모든 공백을 단일 스페이스로 처리 
+  str_squish() %>%  # 연속 공백을 하나로 
   str_remove_all(pattern = '\\s+')
 
 data$Prospos <- data$pros %>%  
@@ -81,7 +81,7 @@ fun1 <- function(x){
     as.list()
 }
 
-#토큰화 
+# 토큰화 
 data <- tidytext::unnest_tokens(
   tbl = data,      
   input = Conspos,   

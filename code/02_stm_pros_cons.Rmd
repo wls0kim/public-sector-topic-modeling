@@ -79,13 +79,13 @@ outcons = prepDocuments(processedcons$documents, processedcons$vocab,
 
 ### 4. STM 입력 정리
 ```{r}
-#장점
+# 장점
 outdocspros =  outpros$documents
 outvocabpros =  outpros$vocab
 outmetapros = outpros$meta
 summary(outpros)
 
-#단점
+# 단점
 outdocscons =  outcons$documents
 outvocabcons = outcons$vocab
 outmetacons = outcons$meta
@@ -107,9 +107,9 @@ meta_fit23pros =
     vocab = outvocabpros,
     data = outmetapros,
     K = 23,         
-    prevalence =~ level, #공변인
-    max.em.its = 75, #최대 반복계산 횟수 
-    verbose = F,  #반복계산결과 화면출력 X
+    prevalence =~ level, # 공변량
+    max.em.its = 75, # EM 최대 반복 횟수 
+    verbose = F,  # 반복 과정 출력 생략
     init.type = "Spectral",
     seed = 37 
   )
@@ -129,9 +129,9 @@ meta_fit34cons =
     vocab = outvocabcons,
     data = outmetacons,
     K = 34,         
-    prevalence =~ level, #공변인
-    max.em.its = 75, #최대 반복계산 횟수 
-    verbose = F, #반복계산결과 화면출력 X
+    prevalence =~ level, # 공변량
+    max.em.its = 75, # EM 최대 반복 횟수 
+    verbose = F, # 반복 과정 출력 생략
     init.type = "Spectral",
     seed = 37 
   )
@@ -294,11 +294,11 @@ plot(meta_fit34cons, type = "summary", custom.labels = conslabel, main = "단점
 
 ## 8. 시각화: 만족 수준에 따른 토픽 비중 차이
 
-### 1. 기본 플랏 생성
+### 1. 공변량 효과 그래프
 ```{r}
-par(family = KOREAN_FONT, mar = c(5, 8, 4, 2) + 0.1)  #텍스트 설정
+par(family = KOREAN_FONT, mar = c(5, 8, 4, 2) + 0.1)  # 한글 글꼴과 여백
 
-#장점
+# 장점
 dprosplot = plot.estimateEffect(preppros23,
                                  covariate = "level",
                                  topics = c(1:23),
@@ -311,7 +311,7 @@ dprosplot = plot.estimateEffect(preppros23,
                                  xlim = c(-.025,.025),
                                  labeltype = "custom",
                                  custom.labels = proslabel)
-#단점
+# 단점
 dconsplot = plot.estimateEffect(prepcons34,
                                  covariate = "level",
                                  topics = c(1:34),
@@ -326,48 +326,48 @@ dconsplot = plot.estimateEffect(prepcons34,
                                  custom.labels = conslabel)
 ```
 
-### 2. 내림차순 정렬을 위한 정보 벡터화
+### 2. 정렬용 추정치와 신뢰구간 정리
 ```{r}
-#장점
-prosmean = dprosplot[["means"]] #mean 저장
-proscis = dprosplot[["cis"]]  #cis 저장
+# 장점
+prosmean = dprosplot[["means"]] # 토픽별 추정치
+proscis = dprosplot[["cis"]]  # 토픽별 신뢰구간
 
 vec_prosmean = unlist(prosmean) 
-vec_proscis = unlist(proscis) #토픽의 첫 cis/마지막 cis, 두번째 … 순 정렬
+vec_proscis = unlist(proscis) # 토픽 순서대로 하한, 상한이 번갈아 나열
 vec_proscis2.5 = vec_proscis[c(seq(1,46,2))]
 vec_proscis97.5 = vec_proscis[c(seq(2,46,2))]
-vec_prosrank = rank(vec_prosmean) #mean 간 랭킹
-vec_proslabel =  dprosplot[["labels"]] #라벨링 
+vec_prosrank = rank(vec_prosmean) # 추정치 순위 (그래프 y축 위치)
+vec_proslabel =  dprosplot[["labels"]] # 토픽 이름
 
 df_plot_diff_pros = cbind(vec_prosmean,vec_prosrank,vec_proscis2.5,vec_proscis97.5,vec_proslabel) %>% 
   as.data.frame()
 
-#단점
+# 단점
 consmean = dconsplot[["means"]]
 conscis = dconsplot[["cis"]]
 
 vec_consmean = unlist(consmean) 
-vec_conscis = unlist(conscis) #토픽의 첫 cis/마지막 cis, 두번째 … 순 정렬
+vec_conscis = unlist(conscis) # 토픽 순서대로 하한, 상한이 번갈아 나열
 vec_conscis2.5 = vec_conscis[c(seq(1,68,2))]
 vec_conscis97.5 = vec_conscis[c(seq(2,68,2))]
-vec_consrank = rank(vec_consmean) #mean 간 랭킹
-vec_conslabel =  dconsplot[["labels"]] #라벨링 
+vec_consrank = rank(vec_consmean) # 추정치 순위 (그래프 y축 위치)
+vec_conslabel =  dconsplot[["labels"]] # 토픽 이름
 
 df_plot_diff_cons = cbind(vec_consmean,vec_consrank,vec_conscis2.5,vec_conscis97.5,vec_conslabel) %>% 
   as.data.frame()
 ```
 
-### 3. 장점 모델
+### 3. 장점 모형
 ```{r}
-ylim = c(0, 24) #토픽수 +2로 y축 설정
+ylim = c(0, 24) # y축 범위: 토픽 수 + 1
 xlim = c(min(unlist(proscis), na.rm=T), max(unlist(proscis), na.rm=T))
 xlab = "총 만족도 낮음 v.s. 총 만족도 높음" 
 ylab = ""
 plot(0, 0,col = "white", xlim = c(-0.03,0.03), ylim = ylim,
-     xlab = xlab, ylab = ylab, yaxt = "n") #배경과 축지정
+     xlab = xlab, ylab = ylab, yaxt = "n") # 빈 그래프와 축
 title(main = "장점 : 토픽별 회귀계수")
 
-#내용 넣기
+# 토픽별 추정치와 신뢰구간
 for (i in 1:23){
   points(df_plot_diff_pros[i,1], df_plot_diff_pros[i,2], pch = 19, cex = 1)
   lines(c(df_plot_diff_pros[i,3], df_plot_diff_pros[i,4]),
@@ -377,14 +377,14 @@ for (i in 1:23){
 }
 ```
 
-### 4. 단점 모델
+### 4. 단점 모형
 ```{r}
-ylim = c(0, 35) #토픽수 +2로 y축 설정
+ylim = c(0, 35) # y축 범위: 토픽 수 + 1
 xlim = c(min(unlist(conscis), na.rm=T), max(unlist(conscis), na.rm=T))
 xlab = "총 만족도 낮음 v.s. 총 만족도 높음" 
 ylab = ""
 plot(0, 0, col = "white", xlim = c(-0.025,0.025), ylim = ylim,
-     xlab = xlab, ylab = ylab, yaxt = "n") #배경과 축지정
+     xlab = xlab, ylab = ylab, yaxt = "n") # 빈 그래프와 축
 title(main = "단점 : 토픽별 회귀계수")
 
 for(i in 1:34){
@@ -398,54 +398,50 @@ for(i in 1:34){
 
 ## 9. 시각화: 토픽 간 상관망
 
-### 1. 상관분석 및 저장(기준 r = .16)
+### 1. 토픽 간 상관 (기준 r = .16)
 ```{r}
-#장점
+# 장점
 out.cor.pros0.16 = topicCorr(meta_fit23pros,method = "simple", cutoff = 0.16)
-df_cor.pros0.16 = out.cor.pros0.16[["cor"]] #피어슨 상관계수 행렬
+df_cor.pros0.16 = out.cor.pros0.16[["cor"]] # 피어슨 상관 행렬
 
-#단점
-out.cor.cons0.16 = topicCorr(meta_fit34cons,method = "simple", cutoff = 0.16) #STM 패키지 내 함수 이용
-df_cor.cons0.16 = out.cor.cons0.16[["cor"]] #피어슨 상관계수 행렬
+# 단점
+out.cor.cons0.16 = topicCorr(meta_fit34cons,method = "simple", cutoff = 0.16) 
+df_cor.cons0.16 = out.cor.cons0.16[["cor"]] # 피어슨 상관 행렬
 ```
 
 
 ### 2. 장점 모형
 ```{r}
-#자료준비
-topics = c(1:23) #토픽 수 
-x = out.cor.pros0.16$posadj[topics, topics] #cut-off 넘는 관계, 인접행렬
-x = x[-c(13,14),-c(13,14)] #삭제된 토픽 제거
-g = igraph::graph.adjacency(x, mode="undirected", weighted=TRUE, diag=FALSE) #엣지 생성
-vlabels =  proslabel #라벨링 
+# 자료 준비
+topics = c(1:23) # 토픽 번호
+x = out.cor.pros0.16$posadj[topics, topics] # 기준을 넘는 양의 상관만 남긴 인접행렬
+x = x[-c(13,14),-c(13,14)] # 이름 없는 토픽 제외
+g = igraph::graph.adjacency(x, mode="undirected", weighted=TRUE, diag=FALSE) # 그래프 생성
+vlabels =  proslabel # 토픽 이름
 
-#엣지 설정
-igraph::V(g)$label = vlabels[-c(13,14)] #삭제된 토픽 라벨에서 제거
-igraph::E(g)$size = 1#엣지 사이즈
-igraph::E(g)$lty = 1 #엣지 스타일 지정
-igraph::E(g)$color = "black" #엣지 컬러 지정
+# 노드 라벨과 엣지 설정
+igraph::V(g)$label = vlabels[-c(13,14)] # 이름 없는 토픽 제외
+igraph::E(g)$size = 1  # 엣지 굵기
+igraph::E(g)$lty = 1 # 엣지 선 모양
+igraph::E(g)$color = "black" # 엣지 색
 
-#노드 설정(열별 theta 평균)
-#열별로 세타 평균 구하기 FOR NODE 
+# 노드 크기: 토픽별 평균 비중(theta 열 평균)
 prostheta = data.frame(meta_fit23pros[["theta"]])
 prospre = apply(prostheta, 2, mean)
-prospre = prospre[-c(13,14)] #삭제된 토픽 제거 
+prospre = prospre[-c(13,14)] # 이름 없는 토픽 제외 
 
-#토픽의 prevalence
 igraph::V(g)$size = prospre
 
-#노드 색
-cl_k = cluster_optimal(g) #클러스터링
-cl_k #들어가야 할 색 갯수 확인
-#멤버십에 따라 노드 색상 지정
+# 노드 색: 군집별
+cl_k = cluster_optimal(g) # 최적 군집화
+cl_k # 군집 수 확인 (팔레트 색 개수와 맞춤)
 
 V(g)$color = membership(cl_k)
-#palette = brewer.pal(19, "Set3") # 팔레트 이용해 색상 지정
 g$palette = c("#fd7f6f", "#7eb0d5", "#b2e061", "#bd7ebe", "#ffb55a", 
                "#ffee65", "#beb9db", "#fdcce5", "#8bd3c7", "#76c68f",
                "#22a7f0", "#df8879", "#c86558", "#9080ff", "#b3d4ff",
                "#63bff0", "#ff6f69", "#f9d423", "#83af9b")
-layout = igraph::layout.fruchterman.reingold #레이아웃 설정 
+layout = igraph::layout.fruchterman.reingold # 레이아웃
 igraph::plot.igraph(g, layout=layout, vertex.label.cex=1,
                     vertex.label.color="black",vertex.size = prospre*500,
                     vertex.label.family = KOREAN_FONT)
@@ -453,31 +449,29 @@ igraph::plot.igraph(g, layout=layout, vertex.label.cex=1,
 
 ### 3. 단점 모형
 ```{r}
-#자료준비
-topics = c(1:34) #토픽 수 
-x = out.cor.cons0.16$posadj[topics, topics] #cut-off 넘는 관계, 인접행렬
-x = x[-c(8,20,27),-c(8,20,27)] #삭제된 토픽 제거
-g = igraph::graph.adjacency(x, mode="undirected", weighted=TRUE, diag=FALSE) #엣지 생성
-vlabels =  conslabel #라벨링 
+# 자료 준비
+topics = c(1:34) # 토픽 번호
+x = out.cor.cons0.16$posadj[topics, topics] # 기준을 넘는 양의 상관만 남긴 인접행렬
+x = x[-c(8,20,27),-c(8,20,27)] # 이름 없는 토픽 제외
+g = igraph::graph.adjacency(x, mode="undirected", weighted=TRUE, diag=FALSE) # 그래프 생성
+vlabels =  conslabel # 토픽 이름
 
-#엣지 설정
-igraph::V(g)$label = vlabels[-c(8,20,27)] #삭제된 토픽 라벨에서 제거 
-igraph::E(g)$size = 1#엣지 사이즈
-igraph::E(g)$lty = 1 #엣지 스타일 지정
-igraph::E(g)$color = "black" #엣지 컬러 지정
+# 노드 라벨과 엣지 설정
+igraph::V(g)$label = vlabels[-c(8,20,27)] # 이름 없는 토픽 제외 
+igraph::E(g)$size = 1  # 엣지 굵기
+igraph::E(g)$lty = 1 # 엣지 선 모양
+igraph::E(g)$color = "black" # 엣지 색
 
-#노드 설정(열별 theta 평균)
+# 노드 설정(열별 theta 평균)
 contheta = data.frame(meta_fit34cons[["theta"]])
 conpre = apply(contheta, 2, mean)
-conpre = conpre[-c(8,20,27)] #삭제된 토픽 제거 
+conpre = conpre[-c(8,20,27)] # 이름 없는 토픽 제외 
 
-#토픽의 prevalence
 igraph::V(g)$size = conpre
 
-#노드 색
-cl_k = cluster_optimal(g) #클러스터링
-cl_k #들어가야 할 색 갯수 확인
-#멤버십에 따라 노드 색상 지정
+# 노드 색: 군집별
+cl_k = cluster_optimal(g) # 최적 군집화
+cl_k # 군집 수 확인 (팔레트 색 개수와 맞춤)
 
 V(g)$color = membership(cl_k)
 g$palette = c("#fd7f6f", "#7eb0d5", "#b2e061", "#bd7ebe", "#ffb55a", 
@@ -486,7 +480,7 @@ g$palette = c("#fd7f6f", "#7eb0d5", "#b2e061", "#bd7ebe", "#ffb55a",
                "#63bff0", "#ff6f69", "#f9d423", "#83af9b", "#a97fb4", 
                "#fe8464", "#e6e682", "#85d4e3", "#ff62a5", "#f2f2f2", 
                "#7a6563")
-layout = igraph::layout.fruchterman.reingold #레이아웃 설정 
+layout = igraph::layout.fruchterman.reingold # 레이아웃
 igraph::plot.igraph(g, layout=layout, vertex.label.cex=1,
                     vertex.label.color="black",vertex.size = conpre*500,
                     vertex.label.family = KOREAN_FONT)
